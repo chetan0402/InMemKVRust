@@ -54,12 +54,24 @@ fn handle_connection(stream: TcpStream, wal: &mut File) -> Result<(), String> {
     Ok(())
 }
 
+fn restore_wal(wal: &mut File) -> Result<(), String> {
+    let reader = BufReader::new(wal);
+
+    for command in reader.lines().map(|c| c.unwrap()) {
+        process_command(&command)?;
+    }
+
+    Ok(())
+}
+
 fn main() {
     let mut wal = OpenOptions::new()
         .write(true)
-        .create_new(true)
+        .read(true)
+        .create(true)
         .open("WAL.log")
         .unwrap();
+    restore_wal(&mut wal).unwrap();
     let listener = TcpListener::bind("localhost:9876").unwrap();
 
     for stream in listener.incoming() {
