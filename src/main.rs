@@ -29,6 +29,10 @@ fn process_command(command: &String) -> Result<String, Box<dyn Error>> {
 
             return value.ok_or("key not found".into());
         }
+        Some("DELETE") => {
+            let key = iter.next().ok_or("invalid command")?.to_string();
+            MAP.with_borrow_mut(|m| m.remove(&key));
+        }
         Some(command) => return Err(format!("unknown command: {}", command).into()),
         None => return Err("No command found".into()),
     }
