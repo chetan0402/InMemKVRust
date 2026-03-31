@@ -7,6 +7,8 @@ use std::{
     net::{TcpListener, TcpStream},
 };
 
+use epoll_rs::{Epoll, EpollEvent, Opts};
+
 thread_local! {
     static MAP: RefCell<HashMap<String,String>> = RefCell::new(HashMap::new());
 }
@@ -42,7 +44,7 @@ fn process_command(command: &String) -> Result<String, Box<dyn Error>> {
     Ok(String::new())
 }
 
-fn handle_connection(stream: TcpStream, wal: &mut File) -> Result<(), Box<dyn Error>> {
+fn handle_connection(stream: &TcpStream, wal: &mut File) -> Result<(), Box<dyn Error>> {
     let mut reader = BufReader::new(stream);
     let mut buffer = String::new();
 
@@ -70,22 +72,46 @@ fn restore_wal(wal: &mut File) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-fn main() {
+fn main() -> Result<(), Box<dyn Error>> {
     let mut wal = OpenOptions::new()
         .write(true)
         .read(true)
         .create(true)
-        .open("WAL.log")
-        .unwrap();
-    restore_wal(&mut wal).unwrap();
-    let listener = TcpListener::bind("localhost:9876").unwrap();
+        .open("WAL.log")?;
+    restore_wal(&mut wal)?;
+    let listener = TcpListener::bind("localhost:9876")?;
+    listener.set_nonblocking(true)?;
 
-    for stream in listener.incoming() {
-        match stream {
-            Ok(stream) => {
-                handle_connection(stream, &mut wal).unwrap_or_else(|e| eprintln!("{}", e))
+    let epoll = Epoll::new()?;
+    let tcp_sock = epoll.add(listener, Opts::IN)?;
+
+    let mut events = [EpollEvent::zeroed(); 32];
+    let mut clients = HashMap::<i32, TcpStream>::new();
+
+    loop {
+        let n = epoll.wait(&mut events)?.len();
+
+        for i in 0..n {
+            let event = events[i];
+
+            if event.fd() == tcp_sock.fd() {
+                while let Ok((stream, _)) = tcp_sock.file().accept() {
+                    let _ = || -> Result<(), Box<dyn Error>> {
+                        stream.set_nonblocking(true)?;
+                        let file = epoll.add(stream, Opts::IN)?;
+                        clients.insert(file.fd(), file.into_file());
+                        Ok(())
+                    };
+                }
+            } else {
+                if let Some(stream) = clients.remove(&event.fd()) {
+                    if let Err(e) = handle_connection(&stream, &mut wal) {
+                        eprintln!("err: {}", e);
+                    } else {
+                        clients.insert(event.fd(), stream);
+                    }
+                }
             }
-            Err(error) => println!("{}", error),
         }
     }
 }
