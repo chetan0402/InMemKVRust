@@ -50,6 +50,8 @@ fn handle_connection(stream: &TcpStream, wal: &mut File) -> Result<(), Box<dyn E
 
     reader.read_line(&mut buffer)?;
 
+    dbg!(&buffer);
+
     wal.write_all(buffer.as_bytes())?;
 
     let resp = match process_command(&buffer) {
@@ -96,12 +98,15 @@ fn main() -> Result<(), Box<dyn Error>> {
 
             if event.fd() == tcp_sock.fd() {
                 while let Ok((stream, _)) = tcp_sock.file().accept() {
-                    let _ = || -> Result<(), Box<dyn Error>> {
+                    let res = || -> Result<(), Box<dyn Error>> {
                         stream.set_nonblocking(true)?;
                         let file = epoll.add(stream, Opts::IN)?;
                         clients.insert(file.fd(), file.into_file());
                         Ok(())
-                    };
+                    }();
+                    if let Err(e) = res {
+                        eprintln!("err: {}", e);
+                    }
                 }
             } else {
                 if let Some(stream) = clients.remove(&event.fd()) {
