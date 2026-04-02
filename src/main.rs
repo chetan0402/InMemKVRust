@@ -1,3 +1,4 @@
+use core::fmt;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -16,6 +17,17 @@ thread_local! {
 const SET_ERR_MSG_SYNTAX: &str = "err: SET <key> <value>";
 const GET_ERR_MSG_SYNTAX: &str = "err: GET <key>";
 const DELETE_ERR_MSG_SYNTAX: &str = "err: DELETE <key>";
+
+#[derive(Debug, Clone)]
+struct CloseFD;
+
+impl Error for CloseFD {}
+
+impl fmt::Display for CloseFD {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Close FD")
+    }
+}
 
 fn process_command(command: &String) -> Result<String, Box<dyn Error>> {
     let mut iter = command.split_whitespace();
@@ -38,7 +50,7 @@ fn process_command(command: &String) -> Result<String, Box<dyn Error>> {
             MAP.with_borrow_mut(|m| m.remove(&key));
         }
         Some(command) => return Err(format!("err: Unknown command: {}", command).into()),
-        None => return Err("err: No command found".into()),
+        None => return Err(CloseFD.into()),
     }
 
     Ok(String::new())
@@ -56,8 +68,15 @@ fn handle_connection(stream: &TcpStream, wal: &mut File) -> Result<(), Box<dyn E
 
     let resp = match process_command(&buffer) {
         Ok(val) => val,
-        Err(e) => e.to_string(),
+        Err(e) => {
+            if let Some(_) = e.downcast_ref::<CloseFD>() {
+                return Err(CloseFD.into());
+            }
+            e.to_string()
+        }
     };
+
+    dbg!(&resp);
 
     reader.get_mut().write(resp.as_bytes())?;
 
