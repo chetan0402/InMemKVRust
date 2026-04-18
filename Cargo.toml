@@ -5,3 +5,10 @@ edition = "2024"
 
 [dependencies]
 epoll-rs = "0.2.2"
+
+[dev-dependencies]
+criterion = "0.8.2"
+
+[[bench]]
+name="set_benchmark"
+harness=false
